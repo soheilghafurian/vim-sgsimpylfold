@@ -1,3 +1,11 @@
+> **Fork note (vim-sgsimpylfold):** a fork of
+> [tmhedberg/SimpylFold](https://github.com/tmhedberg/SimpylFold) that tracks
+> bracket depth, so lines inside an open `(`, `[` or `{` stay in the fold of the
+> statement that opened them (e.g. a dedented closing `)`), and continuation lines
+> that merely start with `from`/`import` are no longer mistaken for imports. It is
+> a drop-in replacement: use it *instead of* the upstream plugin, not alongside it.
+> Tests: `test/run_tests.sh`.
+
 SimpylFold
 ==========
 

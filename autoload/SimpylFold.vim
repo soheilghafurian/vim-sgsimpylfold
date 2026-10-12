@@ -10,6 +10,8 @@ let s:import_start_re = '^\s*\%(from\|import\)'
 let s:import_cont_re = '\%(from.*\((\)[^)]*\|.*\(\\\)\)$'
 let s:import_end_paren_re = ')\s*$'
 let s:import_end_esc_re = '[^\\]$'
+let s:toplevel_def_re = '^\%(async\s\+\)\?\%(class\|def\)\s'
+let s:bracket_or_quote_re = '\%(''''''\|"""\|[''"#()\[\]{}]\)'
 
 " Initialize buffer
 function! SimpylFold#BufferInit() abort
@@ -171,6 +173,44 @@ function! s:multi_string(line, first_re, in_string) abort
     endif
 endfunction
 
+" Net change in bracket depth over a line, ignoring brackets inside strings and
+" comments. An unterminated string cuts the scan, since the rest of the line is
+" string content.
+function! s:bracket_delta(line) abort
+    if a:line !~# '[()\[\]{}]'
+        return 0
+    endif
+    let depth = 0
+    let pos = 0
+    while 1
+        let pos = match(a:line, s:bracket_or_quote_re, pos)
+        if pos == -1
+            break
+        endif
+        let ch = a:line[pos]
+        if ch ==# '#'
+            break
+        elseif ch ==# '"' || ch ==# "'"
+            let quote = a:line[pos : (pos + 2)] ==# repeat(ch, 3) ? repeat(ch, 3) : ch
+            " Consume the string, honoring backslash escapes (e.g. '\\')
+            let rest = strpart(a:line, pos + len(quote))
+            if len(quote) == 3
+                let str_len = matchend(rest, '^\%(\\.\|.\)\{-}' . quote)
+            else
+                let str_len = matchend(rest, '^\%(\\.\|[^\\' . ch . ']\)*' . ch)
+            endif
+            if str_len == -1
+                break
+            endif
+            let pos += len(quote) + str_len
+        else
+            let depth += ch =~# '[([{]' ? 1 : -1
+            let pos += 1
+        endif
+    endwhile
+    return depth
+endfunction
+
 " Create a new cache
 function! s:cache() abort
     let cache = [{}]  " With padding for lnum offset
@@ -186,6 +226,7 @@ function! s:cache() abort
     let docstring_start = -1
     let in_import = 0
     let was_import = 0
+    let bracket_depth = 0
     for lnum in range(1, lnum_last)
         let line = lines[lnum]
 
@@ -214,7 +255,35 @@ function! s:cache() abort
                     let docstring_start = -1
                 endif
                 let in_string = 0
+                " Brackets after the closing quotes still count
+                let string_end = matchend(line, string_end_re)
+                if string_end != -1
+                    let bracket_depth = max([0,
+                        \ bracket_depth + s:bracket_delta(strpart(line, string_end))])
+                endif
             endif
+            continue
+        endif
+
+        " Continuation lines inside open brackets belong to the statement
+        " that opened them, whatever their indentation (e.g. a dedented
+        " closing bracket). Imports have their own continuation handling.
+        if bracket_depth > 0 && line =~# s:toplevel_def_re
+            " Safety net for unbalanced brackets
+            let bracket_depth = 0
+        endif
+        if bracket_depth > 0 && !in_import
+            call add(cache, {'is_blank': 0, 'is_comment': 0, 'is_def': 0,
+                \            'indent': s:indent(line, ind_spaces),
+                \            'foldexpr': len(defs_stack)})
+            let string_match = s:multi_string(line, s:string_start_re, 0)
+            if string_match[0]
+                let in_string = 1
+                let in_string_single = string_match[1]
+                let string_end_re = string_match[3]
+                let docstring_start = -1
+            endif
+            let bracket_depth = max([0, bracket_depth + s:bracket_delta(line)])
             continue
         endif
 
@@ -249,6 +318,12 @@ function! s:cache() abort
 
         call add(cache, {'is_blank': 0, 'is_comment': 0,
             \            'is_def': line =~# b:SimpylFold_def_re, 'indent': ind})
+
+        " Open brackets make the following lines continuations
+        if !(b:SimpylFold_fold_import &&
+                \ (in_import || line =~# s:import_start_re))
+            let bracket_depth = max([0, bracket_depth + s:bracket_delta(line)])
+        endif
 
         " Definitions
         if cache[lnum]['is_def']
