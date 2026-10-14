@@ -9,6 +9,9 @@ setlocal foldmethod=expr
 
 augroup SimpylFold
     autocmd TextChanged,InsertLeave <buffer> call SimpylFold#Recache()
+    " Buffer reloaded from disk (e.g. after a git checkout/pull): the cached
+    " line data no longer matches the text
+    autocmd BufReadPost,FileChangedShellPost <buffer> call SimpylFold#Recache()
 augroup END
 
 if exists('g:SimpylFold_docstring_preview') && g:SimpylFold_docstring_preview

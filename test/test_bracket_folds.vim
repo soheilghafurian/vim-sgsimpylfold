@@ -25,5 +25,16 @@ for [s:lnum, s:level] in s:expected
 endfor
 call assert_equal(len(s:expected), s:checked, 'not all checks ran')
 
+" Reloading the buffer after the file changed on disk must drop the stale cache.
+let s:tmp = tempname() . '.py'
+call writefile(['def f():', '    pass', '', 'def g():', '    pass'], s:tmp)
+execute 'edit ' . s:tmp
+set foldmethod=expr
+call assert_equal(1, foldlevel(4), 'before reload')
+call writefile(['import os', 'import sys', 'x = 1', 'def f():', '    pass', '', 'def g():', '    pass'], s:tmp)
+silent edit!
+call assert_equal(1, foldlevel(7), 'g def after reload')
+call assert_equal(0, foldlevel(3), 'x after reload')
+
 call writefile(len(v:errors) ? v:errors : ['ALL TESTS PASSED'], $SIMPYLFOLD_TEST_OUT)
 qa!
